@@ -32,7 +32,7 @@ from rsl_rl.runners import OnPolicyRunner
 import isaaclab_tasks  # noqa: F401
 import humanoid.sim.tasks  # noqa: F401
 from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
-from isaaclab_tasks.utils import get_checkpoint_path, load_cfg_from_registry, parse_env_cfg
+from isaaclab_tasks.utils import load_cfg_from_registry, parse_env_cfg
 
 from humanoid.viz.rerun_logger import HumanoidRerunLogger
 
@@ -42,7 +42,18 @@ def main():
     agent_cfg = load_cfg_from_registry(args.task, "rsl_rl_cfg_entry_point")
     env_cfg = parse_env_cfg(args.task, device=args.device, num_envs=args.num_envs)
 
-    ckpt = args.checkpoint or get_checkpoint_path(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
+    if args.checkpoint:
+        ckpt = args.checkpoint
+    else:
+        import glob
+
+        candidates = sorted(glob.glob(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name, "*", "model_*.pt")))
+        if not candidates:
+            raise FileNotFoundError(f"no checkpoints under logs/rsl_rl/{agent_cfg.experiment_name}")
+        # latest run dir, highest iteration within it
+        latest_run = os.path.dirname(candidates[-1])
+        ckpt = max(glob.glob(os.path.join(latest_run, "model_*.pt")),
+                   key=lambda p: int(p.rsplit("_", 1)[1].split(".")[0]))
     print(f"[play] checkpoint: {ckpt}", flush=True)
 
     env = gym.make(args.task, cfg=env_cfg)
