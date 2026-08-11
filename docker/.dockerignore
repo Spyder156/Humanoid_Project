@@ -1,0 +1,8 @@
+assets/
+outputs/
+logs/
+runs/
+docs/
+**/__pycache__
+*.rrd
+.git/

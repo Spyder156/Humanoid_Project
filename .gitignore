@@ -1,0 +1,29 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# large / generated
+assets/**
+!assets/README.md
+!assets/download_*.sh
+outputs/
+runs/
+logs/
+wandb/
+*.rrd
+*.ckpt
+*.pt
+*.onnx
+
+# isaac / omniverse caches
+.omni/
+.nvidia-omniverse/
+kit/
+
+# misc
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "humanoid"
+version = "0.1.0"
+description = "Humanoid intelligence research: 3D perception in the loop of whole-body policies"
+requires-python = ">=3.11"
+authors = [{ name = "Raghav Suryan", email = "suryanraghav@gmail.com" }]
+dependencies = [
+    # Core sim stack is installed separately (needs extra index urls, see docs/SETUP.md):
+    #   torch==2.7.0+cu128, isaaclab[isaacsim,all]==2.3.2 (brings isaacsim 5.1, rsl-rl, skrl, hydra)
+    "rerun-sdk>=0.35",
+]
+
+[tool.setuptools.packages.find]
+include = ["humanoid*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
