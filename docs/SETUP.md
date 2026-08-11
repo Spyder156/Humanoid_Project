@@ -7,9 +7,13 @@ Known-good on RTX 5070 Ti (sm_120, Blackwell), driver 580.x, CUDA 12.8.
 ```bash
 conda create -n humanoid python=3.11 -y
 conda activate humanoid
+pip install "setuptools<81" wheel
+pip install "flatdict==4.0.1" --no-build-isolation   # old sdist; isolated build breaks on setuptools>=81
 pip install torch==2.7.0 torchvision==0.22.0 --index-url https://download.pytorch.org/whl/cu128
 pip install "isaaclab[isaacsim,all]==2.3.2" --extra-index-url https://pypi.nvidia.com
-pip install -e .
+pip install "rerun-sdk==0.35.0"                       # 0.36+ needs numpy>=2, sim needs numpy 1.26
+pip install "numpy==1.26.0" "psutil==5.9.8"           # re-pin: resolver drifts these upward
+pip install -e . --no-deps
 ```
 
 `isaaclab[isaacsim,all]` brings Isaac Sim 5.1 (pip wheels), rsl-rl-lib, skrl, sb3, rl_games, hydra.

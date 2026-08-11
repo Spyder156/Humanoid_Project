@@ -21,6 +21,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Pinned sim stack (single fat layer; keep pins in sync with docs/SETUP.md)
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir "setuptools<81" wheel && \
+    # flatdict 4.0.1 (pinned by isaaclab) is an old sdist that needs pkg_resources at
+    # build time; isolated builds pull setuptools>=81 which dropped it
+    pip install --no-cache-dir "flatdict==4.0.1" --no-build-isolation && \
     pip install --no-cache-dir torch==2.7.0 torchvision==0.22.0 \
         --index-url https://download.pytorch.org/whl/cu128 && \
     pip install --no-cache-dir "isaaclab[isaacsim,all]==2.3.2" \
@@ -31,6 +35,9 @@ COPY pyproject.toml README.md ./
 COPY humanoid ./humanoid
 COPY scripts ./scripts
 COPY configs ./configs
-RUN pip install --no-cache-dir -e .
+# rerun 0.36+ needs numpy>=2, isaacsim-kernel needs numpy==1.26.0 — pin both explicitly
+RUN pip install --no-cache-dir "rerun-sdk==0.35.0" && \
+    pip install --no-cache-dir "numpy==1.26.0" "psutil==5.9.8" && \
+    pip install --no-cache-dir -e . --no-deps
 
 CMD ["bash"]

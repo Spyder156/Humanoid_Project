@@ -11,7 +11,8 @@ authors = [{ name = "Raghav Suryan", email = "suryanraghav@gmail.com" }]
 dependencies = [
     # Core sim stack is installed separately (needs extra index urls, see docs/SETUP.md):
     #   torch==2.7.0+cu128, isaaclab[isaacsim,all]==2.3.2 (brings isaacsim 5.1, rsl-rl, skrl, hydra)
-    "rerun-sdk>=0.35",
+    "rerun-sdk>=0.35,<0.36",  # 0.36+ needs numpy>=2
+    "numpy<2",  # isaacsim-kernel 5.1 pins numpy==1.26.0; anything pulling numpy 2.x breaks the sim
 ]
 
 [tool.setuptools.packages.find]
