@@ -46,7 +46,7 @@ def main():
 
     robot = env.unwrapped.scene["robot"]
     cam = env.unwrapped.scene["front_cam"]
-    logger = HumanoidRerunLogger("g1_perception_demo", save_path=args.out)
+    logger = HumanoidRerunLogger("g1_perception_demo", save_path=args.out, camera_entity="world/robot/front_cam")
     print(f"[percep] {args.num_envs} envs, cam {cam.image_shape}", flush=True)
 
     actions = torch.zeros(args.num_envs, env.unwrapped.action_manager.total_action_dim, device=env.unwrapped.device)

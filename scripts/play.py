@@ -63,7 +63,11 @@ def main():
     policy = runner.get_inference_policy(device=agent_cfg.device)
 
     robot = env.unwrapped.scene["robot"]
-    logger = HumanoidRerunLogger("g1_policy_rollout", save_path=args.out)
+    cam = getattr(env.unwrapped.scene, "sensors", {}).get("front_cam")
+    logger = HumanoidRerunLogger(
+        "g1_policy_rollout", save_path=args.out,
+        camera_entity="world/robot/front_cam" if cam is not None else None,
+    )
 
     obs = env.get_observations()
     if isinstance(obs, tuple):
@@ -79,6 +83,15 @@ def main():
             joint_pos=robot.data.joint_pos[0].cpu().numpy(),
             joint_names=robot.data.joint_names,
         )
+        if cam is not None:
+            logger.log_camera(
+                step,
+                cam_pos=cam.data.pos_w[0].cpu().numpy(),
+                cam_quat_ros=cam.data.quat_w_ros[0].cpu().numpy(),
+                intrinsics=cam.data.intrinsic_matrices[0].cpu().numpy(),
+                rgb=cam.data.output["rgb"][0].cpu().numpy(),
+                depth=cam.data.output["distance_to_image_plane"][0].squeeze(-1).cpu().numpy(),
+            )
 
     env.close()
     print(f"[play] PLAY_DONE — wrote {args.out}", flush=True)

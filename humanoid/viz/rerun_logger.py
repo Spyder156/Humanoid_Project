@@ -8,16 +8,30 @@ from __future__ import annotations
 
 import numpy as np
 import rerun as rr
+import rerun.blueprint as rrb
 
 
 class HumanoidRerunLogger:
     """Logs one environment's robot state to a .rrd recording."""
 
-    def __init__(self, app_id: str, save_path: str | None = None, spawn: bool = False):
+    def __init__(self, app_id: str, save_path: str | None = None, spawn: bool = False,
+                 camera_entity: str | None = None):
         rr.init(app_id, spawn=spawn)
         if save_path is not None:
             rr.save(save_path)
         rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
+        # embed a layout so camera panels show up without manual viewer setup
+        main = rrb.Spatial3DView(origin="world", name="scene")
+        if camera_entity is not None:
+            side = rrb.Vertical(
+                rrb.Spatial2DView(origin=f"{camera_entity}/rgb", name="rgb"),
+                rrb.Spatial2DView(origin=f"{camera_entity}/depth", name="depth"),
+                rrb.TimeSeriesView(origin="plots/root_height", name="root height"),
+            )
+            layout = rrb.Horizontal(main, side, column_shares=[3, 1])
+        else:
+            layout = rrb.Horizontal(main, rrb.TimeSeriesView(origin="plots", name="plots"), column_shares=[3, 1])
+        rr.send_blueprint(rrb.Blueprint(layout, collapse_panels=True))
 
     def log_state(
         self,
