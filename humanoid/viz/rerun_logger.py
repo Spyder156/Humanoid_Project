@@ -37,3 +37,26 @@ class HumanoidRerunLogger:
             names = joint_names or [f"joint_{i}" for i in range(len(joint_pos))]
             for name, q in zip(names, joint_pos):
                 rr.log(f"plots/joints/{name}", rr.Scalars(float(q)))
+
+    def log_camera(
+        self,
+        step: int,
+        cam_pos: np.ndarray,  # (3,), world frame
+        cam_quat_ros: np.ndarray,  # (4,) wxyz, ROS/OpenCV optical convention (+Z forward)
+        intrinsics: np.ndarray,  # (3, 3)
+        rgb: np.ndarray | None = None,  # (H, W, 3) uint8
+        depth: np.ndarray | None = None,  # (H, W) float meters; invalid as inf/nan
+        entity: str = "world/robot/front_cam",
+    ) -> None:
+        """Log a posed pinhole camera; the Rerun viewer backprojects depth into 3D."""
+        rr.set_time("step", sequence=step)
+        w, x, y, z = cam_quat_ros
+        rr.log(entity, rr.Transform3D(translation=cam_pos, rotation=rr.Quaternion(xyzw=[x, y, z, w])))
+        h_res, w_res = (depth.shape[:2] if depth is not None else rgb.shape[:2])
+        rr.log(entity, rr.Pinhole(image_from_camera=intrinsics, width=w_res, height=h_res,
+                                  camera_xyz=rr.ViewCoordinates.RDF))
+        if rgb is not None:
+            rr.log(f"{entity}/rgb", rr.Image(rgb).compress(jpeg_quality=80))
+        if depth is not None:
+            depth = np.nan_to_num(depth, nan=0.0, posinf=0.0, neginf=0.0)
+            rr.log(f"{entity}/depth", rr.DepthImage(depth, meter=1.0))
