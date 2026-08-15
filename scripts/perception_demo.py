@@ -35,6 +35,8 @@ import isaaclab_tasks  # noqa: F401
 import humanoid.sim.tasks  # noqa: F401
 from isaaclab_tasks.utils import parse_env_cfg
 
+from humanoid.sim.camera_utils import body_mounted_camera_pose
+from humanoid.sim.tasks.g1_perception import FRONT_CAM_MOUNT_BODY, FRONT_CAM_OFFSET_POS, FRONT_CAM_OFFSET_ROT
 from humanoid.viz.rerun_logger import HumanoidRerunLogger
 
 
@@ -46,6 +48,7 @@ def main():
 
     robot = env.unwrapped.scene["robot"]
     cam = env.unwrapped.scene["front_cam"]
+    mount_idx = robot.data.body_names.index(FRONT_CAM_MOUNT_BODY)
     logger = HumanoidRerunLogger("g1_perception_demo", save_path=args.out, camera_entity="world/robot/front_cam")
     print(f"[percep] {args.num_envs} envs, cam {cam.image_shape}", flush=True)
 
@@ -58,10 +61,14 @@ def main():
             body_names=robot.data.body_names,
             root_pos=robot.data.root_pos_w[0].cpu().numpy(),
         )
+        cam_pos, cam_quat = body_mounted_camera_pose(
+            robot.data.body_pos_w[:, mount_idx], robot.data.body_quat_w[:, mount_idx],
+            FRONT_CAM_OFFSET_POS, FRONT_CAM_OFFSET_ROT,
+        )
         logger.log_camera(
             step,
-            cam_pos=cam.data.pos_w[0].cpu().numpy(),
-            cam_quat_ros=cam.data.quat_w_ros[0].cpu().numpy(),
+            cam_pos=cam_pos[0].cpu().numpy(),
+            cam_quat_ros=cam_quat[0].cpu().numpy(),
             intrinsics=cam.data.intrinsic_matrices[0].cpu().numpy(),
             rgb=cam.data.output["rgb"][0].cpu().numpy(),
             depth=cam.data.output["distance_to_image_plane"][0].squeeze(-1).cpu().numpy(),

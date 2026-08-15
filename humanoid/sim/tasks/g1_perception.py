@@ -14,12 +14,18 @@ from isaaclab_tasks.manager_based.locomotion.velocity.config.g1.flat_env_cfg imp
 from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import MySceneCfg
 
 
+# Mount transform of the camera on torso_link ("world" convention: +X forward;
+# rot = 12 deg pitch down about +Y). Shared with pose logging — see camera_utils.
+FRONT_CAM_MOUNT_BODY = "torso_link"
+FRONT_CAM_OFFSET_POS = (0.12, 0.0, 0.42)
+FRONT_CAM_OFFSET_ROT = (0.9945, 0.0, 0.1045, 0.0)
+
+
 @configclass
 class G1PerceptionSceneCfg(MySceneCfg):
     front_cam: TiledCameraCfg = TiledCameraCfg(
         prim_path="{ENV_REGEX_NS}/Robot/torso_link/front_cam",
-        # "world" convention: +X forward; quat = 12 deg pitch down about +Y
-        offset=TiledCameraCfg.OffsetCfg(pos=(0.12, 0.0, 0.42), rot=(0.9945, 0.0, 0.1045, 0.0), convention="world"),
+        offset=TiledCameraCfg.OffsetCfg(pos=FRONT_CAM_OFFSET_POS, rot=FRONT_CAM_OFFSET_ROT, convention="world"),
         spawn=sim_utils.PinholeCameraCfg(focal_length=18.0, horizontal_aperture=20.955, clipping_range=(0.1, 20.0)),
         width=160,
         height=120,
