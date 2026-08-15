@@ -1,0 +1,492 @@
+diff --git a/mindmap/data_loading/dataset.py b/mindmap/data_loading/dataset.py
+index cfd4a68..270f6e7 100755
+--- a/mindmap/data_loading/dataset.py
++++ b/mindmap/data_loading/dataset.py
+@@ -13,7 +13,7 @@ import os
+ import pickle
+ from typing import Dict, List, Optional, Tuple, Union
+ 
+-from catalyst.data.sampler import DistributedSamplerWrapper
++from mindmap.data_loading.distributed_sampler import DistributedSamplerWrapper
+ import imageio.v2 as imageio
+ import numpy as np
+ from nvblox_torch.timer import Timer
+diff --git a/mindmap/diffuser_actor/encoder.py b/mindmap/diffuser_actor/encoder.py
+index 092af16..78a2b93 100644
+--- a/mindmap/diffuser_actor/encoder.py
++++ b/mindmap/diffuser_actor/encoder.py
+@@ -1,10 +1,10 @@
+-import dgl.geometry as dgl_geo
+ import einops
+ import torch
+ from torch import nn
+ from torch.nn import functional as F
+ 
+ from mindmap.data_loading.data_types import DataType, includes_mesh
++from mindmap.diffuser_actor.fps import farthest_point_sampler
+ from mindmap.diffuser_actor.layers import FFWRelativeCrossAttentionModule, ParallelAttention
+ from mindmap.diffuser_actor.position_encodings import RotaryPositionEncoding3D
+ from mindmap.image_processing.feature_extraction import (
+@@ -363,7 +363,7 @@ class Encoder(nn.Module):
+         context_features_masked[~context_valid_mask.transpose(0, 1)] = 0
+ 
+         # Sample points with FPS
+-        sampled_inds = dgl_geo.farthest_point_sampler(
++        sampled_inds = farthest_point_sampler(
+             einops.rearrange(context_features_masked, "npts b c -> b npts c"),
+             max(npts // self.fps_subsampling_factor, 1),
+             0,
+diff --git a/mindmap/embodiments/humanoid/embodiment.py b/mindmap/embodiments/humanoid/embodiment.py
+index e596ff5..b6181ac 100644
+--- a/mindmap/embodiments/humanoid/embodiment.py
++++ b/mindmap/embodiments/humanoid/embodiment.py
+@@ -92,7 +92,9 @@ class HumanoidEmbodiment(EmbodimentBase):
+                 - Right end-effector quaternion orientation (4)
+                 - Right hand joint states (11)
+         """
+-        from isaaclab_tasks.manager_based.manipulation.pick_place.mdp.observations import (
++        # NOTE(port): isaaclab_tasks 2.3 removed these helpers; mindmap ships identical
++        # implementations in its own task mdp module.
++        from mindmap.tasks.task_definitions.drill_in_box.config.gr1.mdp.observations import (
+             get_hand_state,
+             get_head_state,
+             get_left_eef_pos,
+diff --git a/mindmap/run_closed_loop_policy.py b/mindmap/run_closed_loop_policy.py
+index 19b32b0..cb2a163 100644
+--- a/mindmap/run_closed_loop_policy.py
++++ b/mindmap/run_closed_loop_policy.py
+@@ -20,7 +20,8 @@ from mindmap.cli.args import (
+     ClosedLoopAppArgs,
+     update_model_args_from_checkpoint,
+ )
+-from mindmap.embodiments.task_to_embodiment import get_embodiment_type_from_task
++# NOTE(port): task_to_embodiment transitively imports isaaclab.* submodules, which
++# isaacsim 5.1 forbids before SimulationApp starts — imported inside the app context.
+ from mindmap.isaaclab_utils.simulation_app import SimulationAppContext
+ from mindmap.model_utils.distributed_training import get_rank
+ from mindmap.model_utils.multi_gpu import MultiProcessGroup
+@@ -105,6 +106,8 @@ def main():
+             elif args.demo_mode == ClosedLoopMode.EXECUTE_GT_GOALS:
+                 policy = GroundTruthPolicy(args, device)
+             elif args.demo_mode == ClosedLoopMode.DUMMY:
++                from mindmap.embodiments.task_to_embodiment import get_embodiment_type_from_task
++
+                 embodiment_type = get_embodiment_type_from_task(args.task)
+                 policy = get_dummy_policy_for_embodiment(embodiment_type, device)
+             else:
+diff --git a/mindmap/tasks/task_definitions/drill_in_box/config/gr1/drill_in_box_gr1_env_cfg.py b/mindmap/tasks/task_definitions/drill_in_box/config/gr1/drill_in_box_gr1_env_cfg.py
+index 7b14425..e6cdd9a 100644
+--- a/mindmap/tasks/task_definitions/drill_in_box/config/gr1/drill_in_box_gr1_env_cfg.py
++++ b/mindmap/tasks/task_definitions/drill_in_box/config/gr1/drill_in_box_gr1_env_cfg.py
+@@ -13,7 +13,7 @@ import tempfile
+ 
+ from isaaclab.actuators import ImplicitActuatorCfg
+ from isaaclab.assets import ArticulationCfg
+-from isaaclab.controllers.pink_ik_cfg import PinkIKControllerCfg
++from isaaclab.controllers.pink_ik import PinkIKControllerCfg
+ import isaaclab.controllers.utils as ControllerUtils
+ from isaaclab.devices.openxr import XrCfg
+ import isaaclab.envs.mdp as base_mdp
+@@ -116,29 +116,10 @@ class EventTargetLeftCfg:
+     permute_boxes_right = permute_boxes_right_event_term(TargetSide.LEFT)
+ 
+ 
+-@configclass
+-class ActionsCfg:
+-    """Action specifications for the MDP."""
+ 
+-    pink_ik_cfg = PinkInverseKinematicsActionCfg(
+-        pink_controlled_joint_names=[
+-            "left_shoulder_pitch_joint",
+-            "left_shoulder_roll_joint",
+-            "left_shoulder_yaw_joint",
+-            "left_elbow_pitch_joint",
+-            "left_wrist_yaw_joint",
+-            "left_wrist_roll_joint",
+-            "left_wrist_pitch_joint",
+-            "right_shoulder_pitch_joint",
+-            "right_shoulder_roll_joint",
+-            "right_shoulder_yaw_joint",
+-            "right_elbow_pitch_joint",
+-            "right_wrist_yaw_joint",
+-            "right_wrist_roll_joint",
+-            "right_wrist_pitch_joint",
+-        ],
+-        # Joints to be locked in URDF
+-        ik_urdf_fixed_joint_names=[
++# NOTE(port): isaaclab 2.3 removed PinkInverseKinematicsActionCfg.ik_urdf_fixed_joint_names;
++# the list is kept as a constant for the USD->URDF conversion in __post_init__.
++IK_URDF_FIXED_JOINT_NAMES = [
+             "left_hip_roll_joint",
+             "right_hip_roll_joint",
+             "left_hip_yaw_joint",
+@@ -179,6 +160,28 @@ class ActionsCfg:
+             "head_yaw_joint",
+             "head_roll_joint",
+             "head_pitch_joint",
++        ]
++
++@configclass
++class ActionsCfg:
++    """Action specifications for the MDP."""
++
++    pink_ik_cfg = PinkInverseKinematicsActionCfg(
++        pink_controlled_joint_names=[
++            "left_shoulder_pitch_joint",
++            "left_shoulder_roll_joint",
++            "left_shoulder_yaw_joint",
++            "left_elbow_pitch_joint",
++            "left_wrist_yaw_joint",
++            "left_wrist_roll_joint",
++            "left_wrist_pitch_joint",
++            "right_shoulder_pitch_joint",
++            "right_shoulder_roll_joint",
++            "right_shoulder_yaw_joint",
++            "right_elbow_pitch_joint",
++            "right_wrist_yaw_joint",
++            "right_wrist_roll_joint",
++            "right_wrist_pitch_joint",
+         ],
+         hand_joint_names=[
+             "L_index_proximal_joint",
+@@ -205,6 +208,10 @@ class ActionsCfg:
+             "R_thumb_distal_joint",
+             "head_yaw_joint",
+         ],
++        target_eef_link_names={
++            "left_wrist": "left_hand_pitch_link",
++            "right_wrist": "right_hand_pitch_link",
++        },
+         # the robot in the sim scene we are controlling
+         asset_name="robot",
+         # Configuration for the IK controller
+@@ -215,6 +222,7 @@ class ActionsCfg:
+             base_link_name="base_link",
+             num_hand_joints=23,
+             show_ik_warnings=False,
++            fail_on_joint_limit_violation=False,
+             variable_input_tasks=[
+                 FrameTask(
+                     "GR1T2_fourier_hand_6dof_left_hand_pitch_link",
+@@ -481,9 +489,8 @@ class DrillInBoxGR1EnvCfg(DrillInBoxEnvCfg):
+         temp_urdf_output_path, temp_urdf_meshes_output_path = ControllerUtils.convert_usd_to_urdf(
+             self.scene.robot.spawn.usd_path, self.temp_urdf_dir, force_conversion=True
+         )
+-        ControllerUtils.change_revolute_to_fixed(
+-            temp_urdf_output_path, self.actions.pink_ik_cfg.ik_urdf_fixed_joint_names
+-        )
++        # NOTE(port): isaaclab 2.3 PinkKinematicsConfiguration locks non-controlled
++        # joints internally; fixing them in the URDF now breaks joint-name mapping.
+ 
+         # Set the URDF and mesh paths for the IK controller
+         self.actions.pink_ik_cfg.controller.urdf_path = temp_urdf_output_path
+diff --git a/mindmap/tasks/task_definitions/drill_in_box/drill_in_box_env_cfg.py b/mindmap/tasks/task_definitions/drill_in_box/drill_in_box_env_cfg.py
+index 3bd204d..70d2103 100644
+--- a/mindmap/tasks/task_definitions/drill_in_box/drill_in_box_env_cfg.py
++++ b/mindmap/tasks/task_definitions/drill_in_box/drill_in_box_env_cfg.py
+@@ -40,7 +40,7 @@ class DrillInBoxSceneCfg(InteractiveSceneCfg):
+             pos=[4.420, 1.408, -0.795], rot=[1.0, 0.0, 0.0, 0.0]
+         ),
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/drill_in_box/drill_in_box_scene.usd"
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/drill_in_box/drill_in_box_scene.usd"
+         ),
+     )
+ 
+@@ -50,7 +50,7 @@ class DrillInBoxSceneCfg(InteractiveSceneCfg):
+             pos=[0.23, -0.5, -0.075], rot=[0.707, 0.0, 0.0, 0.707]
+         ),
+         spawn=sim_utils.UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/drill_in_box/assets/open_box.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/drill_in_box/assets/open_box.usd",
+             scale=(1.25, 1.25, 1.25),
+         ),
+     )
+@@ -60,7 +60,7 @@ class DrillInBoxSceneCfg(InteractiveSceneCfg):
+             pos=[-0.15, -0.5, -0.075], rot=[0.707, 0.0, 0.0, 0.707]
+         ),
+         spawn=sim_utils.UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/drill_in_box/assets/closed_box.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/drill_in_box/assets/closed_box.usd",
+             scale=(1.25, 1.25, 1.25),
+         ),
+     )
+@@ -70,7 +70,7 @@ class DrillInBoxSceneCfg(InteractiveSceneCfg):
+             pos=[0.23, 0.5, -0.075], rot=[0.707, 0.0, 0.0, 0.707]
+         ),
+         spawn=sim_utils.UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/drill_in_box/assets/closed_box.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/drill_in_box/assets/closed_box.usd",
+             scale=(1.25, 1.25, 1.25),
+         ),
+     )
+@@ -80,7 +80,7 @@ class DrillInBoxSceneCfg(InteractiveSceneCfg):
+             pos=[-0.15, 0.5, -0.075], rot=[0.707, 0.0, 0.0, 0.707]
+         ),
+         spawn=sim_utils.UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/drill_in_box/assets/closed_box.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/drill_in_box/assets/closed_box.usd",
+             scale=(1.25, 1.25, 1.25),
+         ),
+     )
+@@ -89,7 +89,7 @@ class DrillInBoxSceneCfg(InteractiveSceneCfg):
+         prim_path="{ENV_REGEX_NS}/power_drill",
+         init_state=RigidObjectCfg.InitialStateCfg(pos=[0.35, 0.0, 0.094], rot=[0.0, 0.0, 0.0, 1.0]),
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/drill_in_box/assets/power_drill.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/drill_in_box/assets/power_drill.usd",
+             activate_contact_sensors=True,
+         ),
+     )
+diff --git a/mindmap/tasks/task_definitions/mug_in_drawer/config/franka/mug_in_drawer_franka_env_cfg.py b/mindmap/tasks/task_definitions/mug_in_drawer/config/franka/mug_in_drawer_franka_env_cfg.py
+index e661184..5e6e4de 100644
+--- a/mindmap/tasks/task_definitions/mug_in_drawer/config/franka/mug_in_drawer_franka_env_cfg.py
++++ b/mindmap/tasks/task_definitions/mug_in_drawer/config/franka/mug_in_drawer_franka_env_cfg.py
+@@ -167,7 +167,7 @@ class MugInDrawerFrankaEnvCfg(MugInDrawerEnvCfg):
+                 pos=[0.35, 0.0, 0.094], rot=[0.0, 0.0, 0.0, 1.0]
+             ),
+             spawn=UsdFileCfg(
+-                usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/mug_in_drawer/assets/target_mug/target_mug.usd",
++                usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/mug_in_drawer/assets/target_mug/target_mug.usd",
+                 scale=(0.0125, 0.0125, 0.0125),
+                 activate_contact_sensors=True,
+             ),
+diff --git a/mindmap/tasks/task_definitions/mug_in_drawer/mug_in_drawer_env_cfg.py b/mindmap/tasks/task_definitions/mug_in_drawer/mug_in_drawer_env_cfg.py
+index 3fa44aa..3b6b574 100644
+--- a/mindmap/tasks/task_definitions/mug_in_drawer/mug_in_drawer_env_cfg.py
++++ b/mindmap/tasks/task_definitions/mug_in_drawer/mug_in_drawer_env_cfg.py
+@@ -57,7 +57,7 @@ class KitchenTableSceneCfg(InteractiveSceneCfg):
+             pos=[0.772, 3.39, -0.895], rot=[0.70711, 0, 0, -0.70711]
+         ),
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/mug_in_drawer/mug_in_drawer_scene.usd"
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/mug_in_drawer/mug_in_drawer_scene.usd"
+         ),
+     )
+ 
+@@ -91,14 +91,14 @@ class KitchenTableSceneCfg(InteractiveSceneCfg):
+     mac_n_cheese_on_table = RigidObjectCfg(
+         prim_path="{ENV_REGEX_NS}/mac_n_cheese_on_table",
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/mug_in_drawer/assets/mac_n_cheese_box/mac_n_cheese_box.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/mug_in_drawer/assets/mac_n_cheese_box/mac_n_cheese_box.usd",
+             scale=(1.0, 1.0, 1.0),
+         ),
+     )
+     tomato_soup_on_table = RigidObjectCfg(
+         prim_path="{ENV_REGEX_NS}/tomato_soup_on_table",
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/mug_in_drawer/assets/tomato_soup/tomato_soup.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/mug_in_drawer/assets/tomato_soup/tomato_soup.usd",
+             scale=(1.0, 1.0, 1.0),
+         ),
+     )
+@@ -109,7 +109,7 @@ class KitchenTableSceneCfg(InteractiveSceneCfg):
+     mug1_in_drawer = RigidObjectCfg(
+         prim_path="{ENV_REGEX_NS}/mug1_in_drawer",
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/mug_in_drawer/assets/mug1_in_drawer/mug1_in_drawer.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/mug_in_drawer/assets/mug1_in_drawer/mug1_in_drawer.usd",
+             scale=(0.0125, 0.0125, 0.0125),
+             activate_contact_sensors=True,
+         ),
+@@ -117,28 +117,28 @@ class KitchenTableSceneCfg(InteractiveSceneCfg):
+     mug2_in_drawer = RigidObjectCfg(
+         prim_path="{ENV_REGEX_NS}/mug2_in_drawer",
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/mug_in_drawer/assets/mug2_in_drawer/mug2_in_drawer.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/mug_in_drawer/assets/mug2_in_drawer/mug2_in_drawer.usd",
+             scale=(0.0125, 0.0125, 0.0125),
+         ),
+     )
+     sugar_box_in_drawer = RigidObjectCfg(
+         prim_path="{ENV_REGEX_NS}/sugar_box_in_drawer",
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/mug_in_drawer/assets/sugar_box/sugar_box.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/mug_in_drawer/assets/sugar_box/sugar_box.usd",
+             scale=(1.0, 1.0, 1.0),
+         ),
+     )
+     pudding_box_in_drawer = RigidObjectCfg(
+         prim_path="{ENV_REGEX_NS}/pudding_box_in_drawer",
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/mug_in_drawer/assets/pudding_box/pudding_box.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/mug_in_drawer/assets/pudding_box/pudding_box.usd",
+             scale=(1.0, 1.0, 1.0),
+         ),
+     )
+     gelatin_box_in_drawer = RigidObjectCfg(
+         prim_path="{ENV_REGEX_NS}/gelatin_box_in_drawer",
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/mug_in_drawer/assets/gelatin_box/gelatin_box.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/mug_in_drawer/assets/gelatin_box/gelatin_box.usd",
+             scale=(1.0, 1.0, 1.0),
+         ),
+     )
+diff --git a/mindmap/tasks/task_definitions/stick_in_bin/config/gr1/stick_in_bin_gr1_env_cfg.py b/mindmap/tasks/task_definitions/stick_in_bin/config/gr1/stick_in_bin_gr1_env_cfg.py
+index 50400a8..5923e07 100644
+--- a/mindmap/tasks/task_definitions/stick_in_bin/config/gr1/stick_in_bin_gr1_env_cfg.py
++++ b/mindmap/tasks/task_definitions/stick_in_bin/config/gr1/stick_in_bin_gr1_env_cfg.py
+@@ -12,7 +12,7 @@ import tempfile
+ 
+ from isaaclab.actuators import ImplicitActuatorCfg
+ from isaaclab.assets import ArticulationCfg
+-from isaaclab.controllers.pink_ik_cfg import PinkIKControllerCfg
++from isaaclab.controllers.pink_ik import PinkIKControllerCfg
+ import isaaclab.controllers.utils as ControllerUtils
+ from isaaclab.devices.openxr import XrCfg
+ import isaaclab.envs.mdp as base_mdp
+@@ -101,29 +101,10 @@ class EventTargetLeftCfg:
+     place_drum = place_drum(TargetSide.LEFT)
+ 
+ 
+-@configclass
+-class ActionsCfg:
+-    """Action specifications for the MDP."""
+ 
+-    pink_ik_cfg = PinkInverseKinematicsActionCfg(
+-        pink_controlled_joint_names=[
+-            "left_shoulder_pitch_joint",
+-            "left_shoulder_roll_joint",
+-            "left_shoulder_yaw_joint",
+-            "left_elbow_pitch_joint",
+-            "left_wrist_yaw_joint",
+-            "left_wrist_roll_joint",
+-            "left_wrist_pitch_joint",
+-            "right_shoulder_pitch_joint",
+-            "right_shoulder_roll_joint",
+-            "right_shoulder_yaw_joint",
+-            "right_elbow_pitch_joint",
+-            "right_wrist_yaw_joint",
+-            "right_wrist_roll_joint",
+-            "right_wrist_pitch_joint",
+-        ],
+-        # Joints to be locked in URDF
+-        ik_urdf_fixed_joint_names=[
++# NOTE(port): isaaclab 2.3 removed PinkInverseKinematicsActionCfg.ik_urdf_fixed_joint_names;
++# the list is kept as a constant for the USD->URDF conversion in __post_init__.
++IK_URDF_FIXED_JOINT_NAMES = [
+             "left_hip_roll_joint",
+             "right_hip_roll_joint",
+             "left_hip_yaw_joint",
+@@ -164,6 +145,28 @@ class ActionsCfg:
+             "head_yaw_joint",
+             "head_roll_joint",
+             "head_pitch_joint",
++        ]
++
++@configclass
++class ActionsCfg:
++    """Action specifications for the MDP."""
++
++    pink_ik_cfg = PinkInverseKinematicsActionCfg(
++        pink_controlled_joint_names=[
++            "left_shoulder_pitch_joint",
++            "left_shoulder_roll_joint",
++            "left_shoulder_yaw_joint",
++            "left_elbow_pitch_joint",
++            "left_wrist_yaw_joint",
++            "left_wrist_roll_joint",
++            "left_wrist_pitch_joint",
++            "right_shoulder_pitch_joint",
++            "right_shoulder_roll_joint",
++            "right_shoulder_yaw_joint",
++            "right_elbow_pitch_joint",
++            "right_wrist_yaw_joint",
++            "right_wrist_roll_joint",
++            "right_wrist_pitch_joint",
+         ],
+         hand_joint_names=[
+             "L_index_proximal_joint",
+@@ -190,6 +193,10 @@ class ActionsCfg:
+             "R_thumb_distal_joint",
+             "head_yaw_joint",
+         ],
++        target_eef_link_names={
++            "left_wrist": "left_hand_pitch_link",
++            "right_wrist": "right_hand_pitch_link",
++        },
+         # the robot in the sim scene we are controlling
+         asset_name="robot",
+         # Configuration for the IK controller
+@@ -200,6 +207,7 @@ class ActionsCfg:
+             base_link_name="base_link",
+             num_hand_joints=23,
+             show_ik_warnings=False,
++            fail_on_joint_limit_violation=False,
+             variable_input_tasks=[
+                 FrameTask(
+                     "GR1T2_fourier_hand_6dof_left_hand_pitch_link",
+@@ -457,9 +465,8 @@ class StickInBinGR1EnvCfg(StickInBinEnvCfg):
+         temp_urdf_output_path, temp_urdf_meshes_output_path = ControllerUtils.convert_usd_to_urdf(
+             self.scene.robot.spawn.usd_path, self.temp_urdf_dir, force_conversion=True
+         )
+-        ControllerUtils.change_revolute_to_fixed(
+-            temp_urdf_output_path, self.actions.pink_ik_cfg.ik_urdf_fixed_joint_names
+-        )
++        # NOTE(port): isaaclab 2.3 PinkKinematicsConfiguration locks non-controlled
++        # joints internally; fixing them in the URDF now breaks joint-name mapping.
+ 
+         # Set the URDF and mesh paths for the IK controller
+         self.actions.pink_ik_cfg.controller.urdf_path = temp_urdf_output_path
+diff --git a/mindmap/tasks/task_definitions/stick_in_bin/stick_in_bin_env_cfg.py b/mindmap/tasks/task_definitions/stick_in_bin/stick_in_bin_env_cfg.py
+index 8f3df79..a3652a6 100644
+--- a/mindmap/tasks/task_definitions/stick_in_bin/stick_in_bin_env_cfg.py
++++ b/mindmap/tasks/task_definitions/stick_in_bin/stick_in_bin_env_cfg.py
+@@ -32,14 +32,14 @@ class StickInBinSceneCfg(InteractiveSceneCfg):
+         prim_path="{ENV_REGEX_NS}/stick_in_bin_scene",
+         init_state=AssetBaseCfg.InitialStateCfg(pos=[0.0, 0.0, 0.0], rot=[1.0, 0.0, 0.0, 0.0]),
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/stick_in_bin/stick_in_bin_scene.usd"
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/stick_in_bin/stick_in_bin_scene.usd"
+         ),
+     )
+     open_drum = RigidObjectCfg(
+         prim_path="{ENV_REGEX_NS}/open_drum",
+         init_state=RigidObjectCfg.InitialStateCfg(pos=[4.08, 2.33, 0.0], rot=[0.0, 0.0, 0.0, 0.0]),
+         spawn=sim_utils.UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/stick_in_bin/assets/drum.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/stick_in_bin/assets/drum.usd",
+             scale=(1.0, 1.0, 1.0),
+         ),
+     )
+@@ -48,7 +48,7 @@ class StickInBinSceneCfg(InteractiveSceneCfg):
+         prim_path="{ENV_REGEX_NS}/pick_up_object",
+         init_state=RigidObjectCfg.InitialStateCfg(pos=[4.6, 1.75, 0.845], rot=[1.0, 0.0, 0.0, 0.0]),
+         spawn=UsdFileCfg(
+-            usd_path=f"{ISAAC_NUCLEUS_DIR}/Samples/NvBlox/mindmap/stick_in_bin/assets/wood_stick.usd",
++            usd_path=f"https://omniverse-content-production.s3-us-west-2.amazonaws.com/Assets/Isaac/4.5/Isaac/Samples/NvBlox/mindmap/stick_in_bin/assets/wood_stick.usd",
+             activate_contact_sensors=True,
+             scale=(0.03, 0.03, 0.03),
+         ),
+diff --git a/mindmap/visualization/visualizer.py b/mindmap/visualization/visualizer.py
+index e919366..c60b0a0 100644
+--- a/mindmap/visualization/visualizer.py
++++ b/mindmap/visualization/visualizer.py
+@@ -7,7 +7,7 @@
+ # without an express license agreement from NVIDIA CORPORATION or
+ # its affiliates is strictly prohibited.
+ #
+-from dataclasses import dataclass
++from dataclasses import dataclass, field
+ import os
+ import threading
+ import time
+@@ -798,8 +798,9 @@ class ViewPointController:
+     """
+ 
+     lookat: npt.NDArray
+-    up: npt.NDArray = np.array([0, 0, 0.5])
+-    front: npt.NDArray = np.array([1, 0.1, 0.4])
++    # NOTE(port): py3.11 dataclasses forbid ndarray defaults -> default_factory
++    up: npt.NDArray = field(default_factory=lambda: np.array([0, 0, 0.5]))
++    front: npt.NDArray = field(default_factory=lambda: np.array([1, 0.1, 0.4]))
+     zoom: float = 0.3
+     _camera_params = None
+ 
+diff --git a/submodules/nvblox b/submodules/nvblox
+--- a/submodules/nvblox
++++ b/submodules/nvblox
+@@ -1 +1 @@
+-Subproject commit 9be399a24bf5a28a1ddda86b986f565571ae927d
++Subproject commit 9be399a24bf5a28a1ddda86b986f565571ae927d-dirty

@@ -1,0 +1,66 @@
+diff --git a/cmake/cuda/setup_compute_capability.cmake b/cmake/cuda/setup_compute_capability.cmake
+index b71b157..dd0f957 100644
+--- a/cmake/cuda/setup_compute_capability.cmake
++++ b/cmake/cuda/setup_compute_capability.cmake
+@@ -58,12 +58,10 @@ foreach(ARCH IN LISTS CMAKE_CUDA_ARCHITECTURES)
+   if(num_digits EQUAL 2)
+     set(DOT_SEPARATED "${FIRST_DIGIT}.${SECOND_DIGIT}")
+   else()
+-    # Currently, Caffe2 only support Cuda architectues up to 9.0
+-    message(
+-      WARNING
+-        "Cuda architecture ${ARCH} not supported for nvblox_torch. Reverting to 9.0 and hoping for backward compatibility"
+-    )
+-    set(DOT_SEPARATED "9.0")
++    # 3-digit archs (e.g. 120 -> 12.0), supported by torch >= 2.7
++    string(SUBSTRING "${ARCH}" 0 2 FIRST_TWO_DIGITS)
++    string(SUBSTRING "${ARCH}" 2 1 THIRD_DIGIT)
++    set(DOT_SEPARATED "${FIRST_TWO_DIGITS}.${THIRD_DIGIT}")
+   endif()
+   # Append to the result list
+   list(APPEND TORCH_CUDA_ARCH_LIST "${DOT_SEPARATED}")
+diff --git a/nvblox/include/nvblox/sensors/image.h b/nvblox/include/nvblox/sensors/image.h
+index 025093d..6c406bb 100644
+--- a/nvblox/include/nvblox/sensors/image.h
++++ b/nvblox/include/nvblox/sensors/image.h
+@@ -424,7 +424,8 @@ class MaskedImageView : public ImageView<_ElementType> {
+   /// Probe whether a pixel is masked or not. Will always return true if no mask
+   /// image was provided during construction.
+   __device__ __host__ bool isMasked(const int row_idx, const int col_idx) const;
+-  __device__ __host__ void setMasked(const int row_idx, const int col_idx);
++  // NOTE(port): setMasked removed — wrote through ImageView<const uint8_t>, never
++  // instantiated before gcc14/CUDA 12.8 and has no call sites.
+ 
+   /// Get the mask view
+   ImageView<const uint8_t> mask() const { return mask_; }
+diff --git a/nvblox/include/nvblox/sensors/internal/impl/image_impl.h b/nvblox/include/nvblox/sensors/internal/impl/image_impl.h
+index e22c831..5be735f 100644
+--- a/nvblox/include/nvblox/sensors/internal/impl/image_impl.h
++++ b/nvblox/include/nvblox/sensors/internal/impl/image_impl.h
+@@ -259,10 +259,4 @@ bool MaskedImageView<ElementType>::isMasked(const int row_idx,
+       (mode_ == MaskMode::kInverted) && !mask_(row_idx, col_idx);
+ }
+ 
+-template <typename ElementType>
+-void MaskedImageView<ElementType>::setMasked(const int row_idx,
+-                                             const int col_idx) {
+-  mask_(row_idx, col_idx) = image::kMaskedValue;
+-}
+-
+ }  // namespace nvblox
+diff --git a/nvblox_torch/pyproject.toml b/nvblox_torch/pyproject.toml
+index ebf9a29..d47dc84 100644
+--- a/nvblox_torch/pyproject.toml
++++ b/nvblox_torch/pyproject.toml
+@@ -18,8 +18,9 @@ dependencies = [
+     # * On Jetson, the pypi version does not support CUDA. we instead rely on CUDA-enabled versions being pre-installed on the system.
+     #   These are specified in Dockerfile.jetson_deps. In order for these ones to not be overridden here, the version specifications
+     #   below has to encompass the pre-installed versions
+-    "torch==2.*", # 2.3.0 for jetson and 2.4 for x86.
+-    "torchvision (>0.17.2,<=0.19.0)", # 0.18.0a0+6043bc2 for jetson and 0.19 for x86.
++    # NOTE(port): loosened for torch 2.7+cu128 (sm_120); originally torch==2.* / torchvision<=0.19
++    "torch>=2.3",
++    "torchvision>0.17.2",
+     "matplotlib==3.10",
+     # Torch 2.3 require numpy 1.X
+     "numpy==1.26"

@@ -27,3 +27,4 @@ kit/
 .vscode/
 .idea/
 *.swp
+third_party/
