@@ -15,7 +15,8 @@ from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--task", type=str, default="Humanoid-G1-Perception-v0")
-parser.add_argument("--num_envs", type=int, default=4)
+# default 1: parallel envs share the stage and appear in each other's cameras
+parser.add_argument("--num_envs", type=int, default=1)
 parser.add_argument("--steps", type=int, default=150)
 parser.add_argument("--out", type=str, default="outputs/g1_perception.rrd")
 AppLauncher.add_app_launcher_args(parser)
