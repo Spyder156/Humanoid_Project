@@ -1,3 +1,25 @@
+diff --git a/mindmap/closed_loop/policies/nvblox_diffuser_actor_policy.py b/mindmap/closed_loop/policies/nvblox_diffuser_actor_policy.py
+index 8bb646d..2e617d6 100644
+--- a/mindmap/closed_loop/policies/nvblox_diffuser_actor_policy.py
++++ b/mindmap/closed_loop/policies/nvblox_diffuser_actor_policy.py
+@@ -81,6 +81,17 @@ class NvbloxDiffuserActorPolicy(PolicyBase):
+             self.isaaclab_nvblox_mapper.decay()
+             for camera_handler in observation.get_cameras().values():
+                 self.isaaclab_nvblox_mapper.update_reconstruction_from_camera(camera_handler)
++            # NOTE(port): optional Rerun logging of the live reconstruction,
++            # enabled via MINDMAP_RERUN_OUT=<path.rrd> (throttled).
++            import os as _os
++
++            _rrd = _os.environ.get("MINDMAP_RERUN_OUT")
++            if _rrd:
++                self._rerun_step = getattr(self, "_rerun_step", -1) + 1
++                if self._rerun_step % 10 == 0:
++                    from humanoid.viz.nvblox_rerun import log_nvblox_map
++
++                    log_nvblox_map(self._rerun_step, self.isaaclab_nvblox_mapper.mapper, save_path=_rrd)
+ 
+     def get_new_goal(
+         self,
 diff --git a/mindmap/data_loading/dataset.py b/mindmap/data_loading/dataset.py
 index cfd4a68..270f6e7 100755
 --- a/mindmap/data_loading/dataset.py
@@ -75,7 +97,7 @@ index 19b32b0..cb2a163 100644
                  policy = get_dummy_policy_for_embodiment(embodiment_type, device)
              else:
 diff --git a/mindmap/tasks/task_definitions/drill_in_box/config/gr1/drill_in_box_gr1_env_cfg.py b/mindmap/tasks/task_definitions/drill_in_box/config/gr1/drill_in_box_gr1_env_cfg.py
-index 7b14425..e6cdd9a 100644
+index 7b14425..e6b075d 100644
 --- a/mindmap/tasks/task_definitions/drill_in_box/config/gr1/drill_in_box_gr1_env_cfg.py
 +++ b/mindmap/tasks/task_definitions/drill_in_box/config/gr1/drill_in_box_gr1_env_cfg.py
 @@ -13,7 +13,7 @@ import tempfile
@@ -160,10 +182,12 @@ index 7b14425..e6cdd9a 100644
          # the robot in the sim scene we are controlling
          asset_name="robot",
          # Configuration for the IK controller
-@@ -215,6 +222,7 @@ class ActionsCfg:
+@@ -214,7 +221,8 @@ class ActionsCfg:
+             articulation_name="robot",
              base_link_name="base_link",
              num_hand_joints=23,
-             show_ik_warnings=False,
+-            show_ik_warnings=False,
++            show_ik_warnings=True,
 +            fail_on_joint_limit_violation=False,
              variable_input_tasks=[
                  FrameTask(
